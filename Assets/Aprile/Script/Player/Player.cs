@@ -44,6 +44,7 @@ public class Player : MonoBehaviour
     [Header("조작 키")]
     [SerializeField] private KeyCode slowKey = KeyCode.LeftShift;
     [SerializeField] private KeyCode bombKey = KeyCode.Q;
+    [SerializeField] private KeyCode dashHotKey = KeyCode.E;
 
     [Header("태그")]
     [Tooltip("폭탄이 지우는 탄, 운석 같은 방해물에 붙이는 태그")]
@@ -55,7 +56,7 @@ public class Player : MonoBehaviour
     [SerializeField] private int damagePerHit = 1;
 
     [Header("폭탄 (쿨타임 방식)")]
-    [SerializeField] private float bombCooldown = 10f; // 쿨타임 10초
+    [SerializeField] private float bombCooldown = 10f;
     [Tooltip("폭탄을 쓸 때 번쩍이는 화면 전체 흰색 이미지 (Raycast Target 끄기)")]
     [SerializeField] private Image bombFlash;
     [Tooltip("번쩍일 때 최대 밝기 (0~1)")]
@@ -81,6 +82,17 @@ public class Player : MonoBehaviour
     private SpriteRenderer spriteRenderer;
     private Collider2D col;
 
+    // 패시브 계산을 위한 기본 스탯 백업
+    private int baseMaxHp;
+    private float baseMoveSpeed;
+    private float baseSlowSpeed;
+    private float baseTurnSpeed;
+    private float baseSlowTurnSpeed;
+    private float baseBombCooldown;
+    private float baseInvincibleTime;
+    private bool passiveMaxHpGranted = false;
+    private int activeBonusMaxHp = 0;
+
     private int currentHp;
     private int stageStartScore;
     private float invincibleUntil;
@@ -92,14 +104,19 @@ public class Player : MonoBehaviour
     private float turnVelocity;
     private Vector2 bounceVelocity;
     private float bounceTimer;
-    private float bombTimer = 0f; // 폭탄 쿨타임 타이머
+
+    // 대시 상태 변수
+    private Vector2 dashVelocity;
+    private float dashTimer;
+
+    private float bombTimer = 0f;
 
     public int CurrentHp => currentHp;
     public int MaxHp => maxHp;
-    public float HpRatio => (float)currentHp / maxHp;
+    public float HpRatio => maxHp > 0 ? (float)currentHp / maxHp : 0f;
 
     // HUD 참조용 프로퍼티 (폭탄 쿨타임)
-    public float BombCooldownRatio => Mathf.Clamp01(bombTimer / bombCooldown);
+    public float BombCooldownRatio => bombCooldown > 0f ? Mathf.Clamp01(bombTimer / bombCooldown) : 0f;
     public bool IsBombReady => bombTimer <= 0f;
     public float BombRemaining => bombTimer;
 
@@ -112,6 +129,15 @@ public class Player : MonoBehaviour
         mainCam = Camera.main;
         spriteRenderer = GetComponentInChildren<SpriteRenderer>();
         col = GetComponentInChildren<Collider2D>();
+
+        baseMaxHp = maxHp;
+        baseMoveSpeed = moveSpeed;
+        baseSlowSpeed = slowSpeed;
+        baseTurnSpeed = turnSpeed;
+        baseSlowTurnSpeed = slowTurnSpeed;
+        baseBombCooldown = bombCooldown;
+        baseInvincibleTime = invincibleTime;
+
         currentHp = maxHp;
         Enemy.KillCount = 0;
     }
@@ -125,6 +151,9 @@ public class Player : MonoBehaviour
             stageStartScore = DataManager.Instance.currentScore;
         }
 
+        // 게임 시작 및 스테이지 진입 시 보유 중인 패시브 파츠 효과 즉시 적용
+        ApplyPassiveUpgrades();
+
         if (col == null)
         {
             Debug.LogWarning("[Player] Collider 2D가 없어요. Add Component → Circle Collider 2D를 붙여 주세요.");
@@ -136,20 +165,53 @@ public class Player : MonoBehaviour
         }
     }
 
+    // 상점에서 패시브 파츠를 구매하거나 스테이지가 시작될 때 호출됩니다.
+    public void ApplyPassiveUpgrades()
+    {
+        DataManager data = DataManager.Instance;
+        if (data == null) return;
+
+        // 1. 패시브: 복합 장갑 증설 (최대 HP +3)
+        bool hasPassiveHp = data.HasPart(PartType.PassiveMaxHp);
+        int targetMaxHp = baseMaxHp + (hasPassiveHp ? 3 : 0) + activeBonusMaxHp;
+        if (hasPassiveHp && !passiveMaxHpGranted)
+        {
+            passiveMaxHpGranted = true;
+            maxHp = targetMaxHp;
+            currentHp = Mathf.Min(maxHp, currentHp + 3);
+        }
+        else
+        {
+            maxHp = targetMaxHp;
+            currentHp = Mathf.Min(maxHp, currentHp);
+        }
+
+        // 2. 패시브: 고출력 추진기 (이동 및 회전 속도 +25%)
+        float speedMul = data.HasPart(PartType.PassiveMoveSpeed) ? 1.25f : 1f;
+        moveSpeed = baseMoveSpeed * speedMul;
+        slowSpeed = baseSlowSpeed * speedMul;
+        turnSpeed = baseTurnSpeed * speedMul;
+        slowTurnSpeed = baseSlowTurnSpeed * speedMul;
+
+        // 3. 패시브: 급속 냉각 코어 (폭탄 쿨타임 -25%)
+        bombCooldown = data.HasPart(PartType.PassiveCooldown) ? baseBombCooldown * 0.75f : baseBombCooldown;
+
+        // 4. 패시브: 비상 방어 필드 (피격 무적 시간 +1초)
+        invincibleTime = data.HasPart(PartType.PassiveInvincible) ? baseInvincibleTime + 1.0f : baseInvincibleTime;
+    }
+
     private void Update()
     {
         if (isDead) return;
 
         HandleMovement();
 
-        // 폭탄 타이머 갱신
         if (bombTimer > 0f)
         {
             bombTimer -= Time.deltaTime;
             if (bombTimer < 0f) bombTimer = 0f;
         }
 
-        // Q키 입력 조건: IsBombReady로 체크
         if (Input.GetKeyDown(bombKey) && IsBombReady)
         {
             UseBomb();
@@ -162,6 +224,13 @@ public class Player : MonoBehaviour
         if (Input.GetKeyDown(KeyCode.Alpha2))
         {
             UseSkill(1);
+        }
+
+        // '부스터 대시' 파츠를 보유 중이면 E키로도 즉시 대시 발동 가능
+        if (Input.GetKeyDown(dashHotKey) && DataManager.Instance != null && DataManager.Instance.HasPart(PartType.Dash))
+        {
+            Item item = GetComponent<Item>();
+            if (item != null) item.ExecuteSkill(PartType.Dash);
         }
     }
 
@@ -206,6 +275,12 @@ public class Player : MonoBehaviour
 
         Vector3 newPos = transform.position + transform.up * (forward * speed * Time.deltaTime);
 
+        if (dashTimer > 0f)
+        {
+            dashTimer -= Time.deltaTime;
+            newPos += (Vector3)(dashVelocity * Time.deltaTime);
+        }
+
         if (bounceTimer > 0f)
         {
             bounceTimer -= Time.deltaTime;
@@ -242,6 +317,33 @@ public class Player : MonoBehaviour
         }
 
         transform.position = newPos;
+    }
+
+    // [신규 액티브] 부스터 대시 실행
+    public void PerformDash(float distance, float duration, float invincibleDuration)
+    {
+        if (isDead) return;
+
+        float safeDuration = Mathf.Max(duration, 0.05f);
+        dashVelocity = (Vector2)transform.up * (distance / safeDuration);
+        dashTimer = safeDuration;
+
+        // 대시 중에는 깜빡임 없이 무적 판정 부여 (잔상과 어우러지도록)
+        MakeInvincible(invincibleDuration, false);
+    }
+
+    // [신규 액티브] 나노 HP 증강 실행 (최대 HP 확장 + 즉시 회복)
+    public void ActivateHpBoostSkill(int maxHpBonus, int healAmount)
+    {
+        if (isDead) return;
+
+        if (activeBonusMaxHp < 5)
+        {
+            activeBonusMaxHp += Mathf.Max(0, maxHpBonus);
+        }
+        ApplyPassiveUpgrades();
+        currentHp = Mathf.Min(maxHp, currentHp + Mathf.Max(1, healAmount));
+        Debug.Log($"[나노 HP 증강] 현재 HP: {currentHp}/{maxHp}");
     }
 
     private void OnTriggerEnter2D(Collider2D other)
@@ -387,7 +489,7 @@ public class Player : MonoBehaviour
 
     private void UseBomb()
     {
-        bombTimer = bombCooldown; // 타이머 초기화 (쿨타임 시작)
+        bombTimer = bombCooldown;
         SoundManager.Play(SoundManager.Sfx.Bomb);
 
         foreach (GameObject bullet in GameObject.FindGameObjectsWithTag(enemyBulletTag))

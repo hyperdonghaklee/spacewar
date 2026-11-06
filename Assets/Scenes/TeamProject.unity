@@ -848,8 +848,12 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: "SPACE WAR\r\n\r\n\r\n\uAE30\uD68D\r\n[\uC774\uB984]\r\n\r\n\uD504\uB85C\uADF8\uB798\uBC0D\r\n[\uC774\uB984]\r\n\r\n\uADF8\uB798\uD53D\r\n[\uC774\uB984]\r\n\r\n\uC0AC\uC6B4\uB4DC\r\n[\uC774\uB984]\r\n\r\n\r\n\uC0AC\uC6A9\uD55C
-    \uBB34\uB8CC \uC5D0\uC14B\r\nKenney (kenney.nl)\r\n\r\n\r\n\uD50C\uB808\uC774\uD574
+  m_text: "SPACE WAR\r\n\r\n\r\n\uAE30\uD68D\n[\uAE40\uC2B9\uC6B4, \uC870\uC2B9\uD6C4,
+    \uC774\uB3D9\uD559, \uBBFC\uB3D9\uD601]\r\n\r\n\uD504\uB85C\uADF8\uB798\uBC0D\r\n[\uAE40\uC2B9\uC6B4,
+    \uC870\uC2B9\uD6C4, \uC774\uB3D9\uD559, \uBBFC\uB3D9\uD601]\r\n\r\n\uADF8\uB798\uD53D\r\n[\uAE40\uC2B9\uC6B4,
+    \uC870\uC2B9\uD6C4, \uC774\uB3D9\uD559, \uBBFC\uB3D9\uD601]\r\n\r\n\uC0AC\uC6B4\uB4DC\r\n[\uAE40\uC2B9\uC6B4,
+    \uC870\uC2B9\uD6C4, \uC774\uB3D9\uD559, \uBBFC\uB3D9\uD601]\r\n\r\n\r\n\uC0AC\uC6A9\uD55C
+    \uBB34\uB8CC \uC5D0\uC14B\r\nKenney (kenney.nl)\nUnity Asset Store\r\n\r\n\r\n\uD50C\uB808\uC774\uD574
     \uC8FC\uC154\uC11C \uAC10\uC0AC\uD569\uB2C8\uB2E4"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 70a5a187d34d9d2468ef5b2ba20b4f12, type: 2}
@@ -7458,6 +7462,7 @@ MonoBehaviour:
   bossCeilingGap: 0
   slowKey: 304
   bombKey: 113
+  dashHotKey: 101
   enemyBulletTag: EnemyBullet
   maxHp: 7
   damagePerHit: 1
@@ -7551,6 +7556,16 @@ MonoBehaviour:
   shockwaveRadius: 4
   shockwaveKnockback: 3
   shockwaveKnockbackDuration: 0.25
+  dashDistance: 3.8
+  dashDuration: 0.22
+  dashInvincibleTime: 0.45
+  dashCooldown: 3.5
+  activeMaxHpBonus: 1
+  activeHealAmount: 2
+  hpBoostCooldown: 12
+  energyShieldDuration: 3.5
+  energyShieldRadius: 1.8
+  energyShieldCooldown: 8
 --- !u!114 &992907827
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -7715,7 +7730,7 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 902161120}
   m_HandleRect: {fileID: 902161119}
   m_Direction: 2
-  m_Value: 0
+  m_Value: 1
   m_Size: 1
   m_NumberOfSteps: 0
   m_OnValueChanged:

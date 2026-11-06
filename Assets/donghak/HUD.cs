@@ -1,4 +1,5 @@
-﻿using TMPro;
+﻿using System.Collections.Generic;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -15,6 +16,7 @@ public class HUD : MonoBehaviour
         public Image cover;
         [Tooltip("남은 초 숫자")]
         public TMP_Text timeText;
+        [HideInInspector] public TMP_Text labelText;
     }
 
     [System.Serializable]
@@ -45,21 +47,27 @@ public class HUD : MonoBehaviour
         new PartIcon { type = PartType.TimeStop },
         new PartIcon { type = PartType.Reflect },
         new PartIcon { type = PartType.BlackHole },
-        new PartIcon { type = PartType.SlowField }
+        new PartIcon { type = PartType.SlowField },
+        new PartIcon { type = PartType.PositionSwap },
+        new PartIcon { type = PartType.Shockwave },
+        new PartIcon { type = PartType.Dash },
+        new PartIcon { type = PartType.HpBoostActive },
+        new PartIcon { type = PartType.EnergyShield }
     };
-    [Header("쿨타임 칸 자동 생성 (임시 — 나중에 직접 만들면 끄고 위 칸에 연결)")]
-    [Tooltip("켜면 게임 시작 때 HP바 밑에 칸 3개를 자동으로 만듦")]
+
+    [Header("쿨타임 칸 자동 생성")]
+    [Tooltip("켜면 게임 시작 때 HP바 밑에 칸을 자동으로 만듦")]
     [SerializeField] private bool autoBuildSlots = true;
     [SerializeField] private Sprite bombIcon;
     [Tooltip("화면 왼쪽 위 모서리에서 칸 줄까지 거리 (1920x1080 기준 픽셀)")]
     [SerializeField] private Vector2 autoBarPosition = new Vector2(15f, -55f);
-    [SerializeField] private float autoSlotSize = 64f;
+    [SerializeField] private float autoSlotSize = 68f;
     [SerializeField] private float autoSlotSpacing = 10f;
     [SerializeField] private float autoIconPadding = 6f;
-    [SerializeField] private float autoKeyFontSize = 16f;
-    [SerializeField] private float autoTimeFontSize = 30f;
+    [SerializeField] private float autoKeyFontSize = 15f;
+    [SerializeField] private float autoTimeFontSize = 28f;
     [SerializeField] private Color autoSlotBackColor = new Color(0.1f, 0.12f, 0.2f, 0.85f);
-    [SerializeField] private Color autoCoverColor = new Color(0f, 0f, 0f, 0.7f);
+    [SerializeField] private Color autoCoverColor = new Color(0f, 0f, 0f, 0.72f);
 
     [SerializeField] private Color iconReadyColor = Color.white;
     [SerializeField] private Color iconCoolingColor = new Color(0.55f, 0.55f, 0.55f);
@@ -83,10 +91,29 @@ public class HUD : MonoBehaviour
     [Tooltip("HP가 이 비율 이하면 경고 색")]
     [SerializeField, Range(0f, 1f)] private float lowHpRatio = 0.4f;
 
+    private CooldownSlot dashDedicatedSlot;
+    private TMP_Text passiveSummaryText;
+    private static Sprite fallbackWhiteSprite;
+
     private Player player;
     private Item item;
     private Boss boss;
     private float bossSearchTimer;
+
+    // Image.Type.Filled(Radial360)가 스프라이트 미연결 시에도 100% 작동하도록 기본 흰색 스프라이트를 생성합니다.
+    private static Sprite GetFallbackSprite()
+    {
+        if (fallbackWhiteSprite == null)
+        {
+            Texture2D tex = new Texture2D(16, 16, TextureFormat.RGBA32, false);
+            Color[] cols = new Color[16 * 16];
+            for (int i = 0; i < cols.Length; i++) cols[i] = Color.white;
+            tex.SetPixels(cols);
+            tex.Apply();
+            fallbackWhiteSprite = Sprite.Create(tex, new Rect(0, 0, 16, 16), new Vector2(0.5f, 0.5f));
+        }
+        return fallbackWhiteSprite;
+    }
 
     void Start()
     {
@@ -94,13 +121,14 @@ public class HUD : MonoBehaviour
 
         if (autoBuildSlots) BuildSlots();
 
-        CheckSlot(bombSlot, "Bomb Slot");
         PrepareCover(bombSlot);
-
         for (int i = 0; i < skillSlots.Length; i++)
         {
-            CheckSlot(skillSlots[i], $"Skill Slots {i}");
             PrepareCover(skillSlots[i]);
+        }
+        if (dashDedicatedSlot != null)
+        {
+            PrepareCover(dashDedicatedSlot);
         }
     }
 
@@ -124,7 +152,7 @@ public class HUD : MonoBehaviour
         barRt.anchorMax = new Vector2(0f, 1f);
         barRt.pivot = new Vector2(0f, 1f);
         barRt.anchoredPosition = autoBarPosition;
-        barRt.sizeDelta = new Vector2(autoSlotSize * 3f + autoSlotSpacing * 2f, autoSlotSize);
+        barRt.sizeDelta = new Vector2(autoSlotSize * 4f + autoSlotSpacing * 3f, autoSlotSize);
 
         HorizontalLayoutGroup layout = bar.AddComponent<HorizontalLayoutGroup>();
         layout.spacing = autoSlotSpacing;
@@ -136,15 +164,34 @@ public class HUD : MonoBehaviour
 
         TMP_FontAsset font = hpText != null ? hpText.font : null;
 
-        bombSlot = CreateSlot(barRt, "BombSlot", "Q", bombIcon, font);
+        bombSlot = CreateSlot(barRt, "BombSlot", "Q", bombIcon, "폭탄", new Color(1f, 0.45f, 0.25f), font);
         skillSlots = new[]
         {
-            CreateSlot(barRt, "Slot1", "1", null, font),
-            CreateSlot(barRt, "Slot2", "2", null, font)
+            CreateSlot(barRt, "Slot1", "1", null, "슬롯1", new Color(0.25f, 0.8f, 1f), font),
+            CreateSlot(barRt, "Slot2", "2", null, "슬롯2", new Color(0.25f, 0.8f, 1f), font)
         };
+        // 부스터 대시 구매 시 E키 전용 슬롯 (1, 2번 슬롯에 중복 장착되지 않았을 때 자동 표시)
+        dashDedicatedSlot = CreateSlot(barRt, "DashSlot", "E", IconOf(PartType.Dash), "대시", new Color(0f, 1f, 0.75f), font);
+
+        // 스킬 바 아래에 현재 적용 중인 패시브 파츠 요약 텍스트 생성
+        GameObject passiveObj = new GameObject("PassiveSummaryText", typeof(RectTransform));
+        RectTransform passiveRt = passiveObj.GetComponent<RectTransform>();
+        passiveRt.SetParent(canvas.rootCanvas.transform, false);
+        passiveRt.anchorMin = new Vector2(0f, 1f);
+        passiveRt.anchorMax = new Vector2(0f, 1f);
+        passiveRt.pivot = new Vector2(0f, 1f);
+        passiveRt.anchoredPosition = new Vector2(autoBarPosition.x + 2f, autoBarPosition.y - autoSlotSize - 8f);
+        passiveRt.sizeDelta = new Vector2(500f, 36f);
+
+        passiveSummaryText = passiveObj.AddComponent<TextMeshProUGUI>();
+        if (font != null) passiveSummaryText.font = font;
+        passiveSummaryText.fontSize = 20f;
+        passiveSummaryText.color = new Color(0.5f, 1f, 0.75f, 0.95f);
+        passiveSummaryText.alignment = TextAlignmentOptions.TopLeft;
+        passiveSummaryText.raycastTarget = false;
     }
 
-    CooldownSlot CreateSlot(RectTransform parent, string slotName, string key, Sprite sprite, TMP_FontAsset font)
+    CooldownSlot CreateSlot(RectTransform parent, string slotName, string key, Sprite sprite, string defaultLabel, Color fallbackTint, TMP_FontAsset font)
     {
         GameObject go = new GameObject(slotName, typeof(RectTransform), typeof(Image));
         RectTransform rt = go.GetComponent<RectTransform>();
@@ -155,20 +202,27 @@ public class HUD : MonoBehaviour
         back.raycastTarget = false;
 
         Image icon = CreateImage("Icon", rt);
-        icon.sprite = sprite;
+        icon.sprite = sprite != null ? sprite : GetFallbackSprite();
+        icon.color = sprite != null ? Color.white : fallbackTint;
         icon.preserveAspect = true;
 
+        // 슬롯 하단 스킬 이름 표시 라벨
+        TMP_Text label = CreateText("LabelText", rt, font, 14f, TextAlignmentOptions.Bottom, 4f);
+        label.text = defaultLabel;
+
         Image cover = CreateImage("Cover", rt);
+        cover.sprite = GetFallbackSprite();
         cover.color = autoCoverColor;
 
         TMP_Text keyText = CreateText("KeyText", rt, font, autoKeyFontSize, TextAlignmentOptions.TopLeft, 3f);
         keyText.text = key;
+        keyText.color = new Color(1f, 0.9f, 0.3f, 1f);
 
         TMP_Text time = CreateText("TimeText", rt, font, autoTimeFontSize, TextAlignmentOptions.Center, 0f);
         time.fontStyle = FontStyles.Bold;
         time.text = "";
 
-        return new CooldownSlot { root = go, icon = icon, cover = cover, timeText = time };
+        return new CooldownSlot { root = go, icon = icon, cover = cover, timeText = time, labelText = label };
     }
 
     Image CreateImage(string objName, RectTransform parent)
@@ -206,15 +260,6 @@ public class HUD : MonoBehaviour
         rt.offsetMax = new Vector2(-padding, -padding);
     }
 
-    void CheckSlot(CooldownSlot slot, string label)
-    {
-        if (slot.icon == null) Debug.LogWarning($"[HUD] {label} → Icon 칸이 비어 있어요.");
-        if (slot.cover == null) Debug.LogWarning($"[HUD] {label} → Cover 칸이 비어 있어요.");
-        if (slot.timeText == null) Debug.LogWarning($"[HUD] {label} → Time Text 칸이 비어 있어요.");
-        if (label == "Bomb Slot" && slot.icon != null && slot.icon.sprite == null)
-            Debug.LogWarning("[HUD] 폭탄 Icon에 그림(Source Image)이 없어요.");
-    }
-
     void UpdatePlayer()
     {
         if (player == null)
@@ -238,55 +283,132 @@ public class HUD : MonoBehaviour
     {
         if (player == null) return;
 
-        SetCooldown(bombSlot, player.BombRemaining, player.BombCooldownRatio);
+        // 1. 폭탄 슬롯 갱신
+        SetCooldown(bombSlot, player.BombRemaining, player.BombCooldownRatio, bombIcon != null ? Color.white : new Color(1f, 0.45f, 0.25f));
 
         DataManager data = DataManager.Instance;
 
+        // 2. 퀵슬롯 1, 2번 갱신
         for (int i = 0; i < skillSlots.Length; i++)
         {
             CooldownSlot slot = skillSlots[i];
             PartType type = data != null && i < data.quickSlots.Length ? data.quickSlots[i] : PartType.None;
-            bool show = type != PartType.None;
+            bool show = DataManager.IsActivePart(type);
 
             if (slot.root != null && slot.root.activeSelf != show) slot.root.SetActive(show);
             if (!show) continue;
 
-            SetIcon(slot, IconOf(type));
+            Sprite customSprite = IconOf(type);
+            SetIconAndLabel(slot, customSprite, ShortNameOf(type));
 
             float remain = item != null ? item.Remaining(type) : 0f;
             float ratio = item != null ? item.CooldownRatio(type) : 0f;
-            SetCooldown(slot, remain, ratio);
+            Color readyCol = customSprite != null ? iconReadyColor : ColorOf(type);
+            SetCooldown(slot, remain, ratio, readyCol);
+        }
+
+        // 3. E키 부스터 대시 전용 슬롯 갱신 (대시를 보유 중이고 1·2번 슬롯에 없을 때 표시)
+        if (dashDedicatedSlot != null && dashDedicatedSlot.root != null)
+        {
+            bool ownsDash = data != null && data.HasPart(PartType.Dash);
+            bool equippedInQuickSlot = data != null && (data.quickSlots[0] == PartType.Dash || data.quickSlots[1] == PartType.Dash);
+            bool showDashSlot = ownsDash && !equippedInQuickSlot;
+
+            if (dashDedicatedSlot.root.activeSelf != showDashSlot)
+                dashDedicatedSlot.root.SetActive(showDashSlot);
+
+            if (showDashSlot)
+            {
+                Sprite dashSp = IconOf(PartType.Dash);
+                SetIconAndLabel(dashDedicatedSlot, dashSp, "대시");
+                float remain = item != null ? item.Remaining(PartType.Dash) : 0f;
+                float ratio = item != null ? item.CooldownRatio(PartType.Dash) : 0f;
+                SetCooldown(dashDedicatedSlot, remain, ratio, dashSp != null ? iconReadyColor : ColorOf(PartType.Dash));
+            }
+        }
+
+        // 4. 보유 중인 패시브 파츠 요약 텍스트 갱신
+        if (passiveSummaryText != null && data != null)
+        {
+            List<string> pNames = new List<string>();
+            if (data.HasPart(PartType.PassiveMaxHp)) pNames.Add("HP+3");
+            if (data.HasPart(PartType.PassiveMoveSpeed)) pNames.Add("기동+25%");
+            if (data.HasPart(PartType.PassiveCooldown)) pNames.Add("쿨감-25%");
+            if (data.HasPart(PartType.PassiveInvincible)) pNames.Add("무적+1s");
+
+            SetText(passiveSummaryText, pNames.Count > 0 ? $"패시브: {string.Join(" / ", pNames)}" : "");
         }
     }
 
     Sprite IconOf(PartType type)
     {
+        if (partIcons == null) return null;
         foreach (PartIcon p in partIcons)
         {
             if (p.type == type) return p.icon;
         }
-
         return null;
     }
 
-    void SetIcon(CooldownSlot slot, Sprite sprite)
+    string ShortNameOf(PartType type)
     {
-        if (slot.icon == null || sprite == null || slot.icon.sprite == sprite) return;
+        switch (type)
+        {
+            case PartType.ForceHoming: return "강제유도";
+            case PartType.TimeStop: return "시간정지";
+            case PartType.Reflect: return "공격반사";
+            case PartType.BlackHole: return "블랙홀";
+            case PartType.SlowField: return "감속장";
+            case PartType.PositionSwap: return "위치스왑";
+            case PartType.Shockwave: return "충격파";
+            case PartType.Dash: return "대시";
+            case PartType.HpBoostActive: return "HP증강";
+            case PartType.EnergyShield: return "실드";
+            default: return "";
+        }
+    }
 
-        slot.icon.sprite = sprite;
-        PrepareCover(slot);
+    Color ColorOf(PartType type)
+    {
+        switch (type)
+        {
+            case PartType.ForceHoming: return new Color(1f, 0.55f, 0.2f);
+            case PartType.TimeStop: return new Color(0.3f, 0.85f, 1f);
+            case PartType.Reflect: return new Color(1f, 0.85f, 0.2f);
+            case PartType.BlackHole: return new Color(0.65f, 0.35f, 1f);
+            case PartType.SlowField: return new Color(0.3f, 0.6f, 1f);
+            case PartType.PositionSwap: return new Color(0.95f, 0.4f, 0.8f);
+            case PartType.Shockwave: return new Color(0.4f, 0.95f, 1f);
+            case PartType.Dash: return new Color(0f, 1f, 0.75f);
+            case PartType.HpBoostActive: return new Color(0.25f, 0.95f, 0.4f);
+            case PartType.EnergyShield: return new Color(0.2f, 0.75f, 1f);
+            default: return Color.white;
+        }
+    }
+
+    void SetIconAndLabel(CooldownSlot slot, Sprite customSprite, string labelStr)
+    {
+        if (slot.labelText != null) SetText(slot.labelText, labelStr);
+
+        Sprite targetSprite = customSprite != null ? customSprite : GetFallbackSprite();
+        if (slot.icon != null && slot.icon.sprite != targetSprite)
+        {
+            slot.icon.sprite = targetSprite;
+            PrepareCover(slot);
+        }
     }
 
     void PrepareCover(CooldownSlot slot)
     {
-        if (slot.cover == null) return;
+        if (slot == null || slot.cover == null) return;
 
-        if (slot.icon != null)
+        if (slot.icon != null && slot.icon.sprite == null)
         {
-            slot.cover.sprite = slot.icon.sprite;
-            slot.cover.preserveAspect = slot.icon.preserveAspect;
+            slot.icon.sprite = GetFallbackSprite();
         }
 
+        slot.cover.sprite = (slot.icon != null && slot.icon.sprite != null) ? slot.icon.sprite : GetFallbackSprite();
+        slot.cover.preserveAspect = slot.icon != null && slot.icon.preserveAspect;
         slot.cover.type = Image.Type.Filled;
         slot.cover.fillMethod = Image.FillMethod.Radial360;
         slot.cover.fillOrigin = (int)Image.Origin360.Top;
@@ -295,12 +417,20 @@ public class HUD : MonoBehaviour
         slot.cover.fillAmount = 0f;
     }
 
-    void SetCooldown(CooldownSlot slot, float remain, float ratio)
+    void SetCooldown(CooldownSlot slot, float remain, float ratio, Color readyColor)
     {
+        if (slot == null) return;
         bool cooling = remain > 0f;
 
-        if (slot.cover != null) slot.cover.fillAmount = Mathf.Clamp01(ratio);
-        if (slot.icon != null) slot.icon.color = cooling ? iconCoolingColor : iconReadyColor;
+        if (slot.cover != null)
+        {
+            if (slot.cover.sprite == null) PrepareCover(slot);
+            slot.cover.fillAmount = cooling ? Mathf.Clamp01(ratio) : 0f;
+        }
+        if (slot.icon != null)
+        {
+            slot.icon.color = cooling ? iconCoolingColor : readyColor;
+        }
         SetText(slot.timeText, cooling ? Mathf.CeilToInt(remain).ToString() : "");
     }
 

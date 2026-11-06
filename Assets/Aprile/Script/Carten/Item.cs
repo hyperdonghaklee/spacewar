@@ -7,6 +7,7 @@ public class Item : MonoBehaviour
     [Header("스킬 기본 설정")]
     public float skillCooldown = 5f;
     private Dictionary<PartType, float> cooldownEnd = new Dictionary<PartType, float>();
+    private Dictionary<PartType, float> lastCooldownDuration = new Dictionary<PartType, float>();
 
     [Header("스킬 세부 파라미터")]
     [Tooltip("시간 정지 지속 시간")]
@@ -19,16 +20,59 @@ public class Item : MonoBehaviour
     public float reflectRadius = 4f;
     public float blackHoleRadius = 6f;
     public float blackHoleDuration = 3f;
+
     [Header("위치 스왑")]
     [Tooltip("스왑 당한 적이 멈춰 있는 시간(초)")]
     public float swapStunTime = 1f;
     [Tooltip("스왑 직후 플레이어 무적 시간(초)")]
     public float swapInvincibleTime = 0.6f;
+
     [Header("충격파")]
     public float shockwaveRadius = 4f;
     [Tooltip("적이 밀려나는 거리")]
     public float shockwaveKnockback = 3f;
     public float shockwaveKnockbackDuration = 0.25f;
+
+    [Header("신규 액티브 1: 부스터 대시 (Dash)")]
+    [Tooltip("대시 이동 거리")]
+    public float dashDistance = 3.8f;
+    [Tooltip("대시 이동 시간(초)")]
+    public float dashDuration = 0.22f;
+    [Tooltip("대시 무적 시간(초)")]
+    public float dashInvincibleTime = 0.45f;
+    [Tooltip("대시 기본 쿨타임(초)")]
+    public float dashCooldown = 3.5f;
+
+    [Header("신규 액티브 2: 나노 HP 증강 (HpBoostActive)")]
+    [Tooltip("사용 시 영구히 늘어나는 최대 HP 양 (스테이지당 최대 +5 제한)")]
+    public int activeMaxHpBonus = 1;
+    [Tooltip("사용 시 즉시 회복되는 HP 양")]
+    public int activeHealAmount = 2;
+    [Tooltip("HP 증강 기본 쿨타임(초)")]
+    public float hpBoostCooldown = 12f;
+
+    [Header("신규 액티브 3: 에너지 실드 (EnergyShield)")]
+    [Tooltip("실드 지속 시간(초)")]
+    public float energyShieldDuration = 3.5f;
+    [Tooltip("실드 반경")]
+    public float energyShieldRadius = 1.8f;
+    [Tooltip("에너지 실드 기본 쿨타임(초)")]
+    public float energyShieldCooldown = 8f;
+
+    // 패시브 '급속 냉각 코어(PassiveCooldown)' 보유 시 쿨타임 25% 감소 적용
+    public float GetSkillMaxCooldown(PartType skill)
+    {
+        float baseCd = skillCooldown;
+        if (skill == PartType.Dash) baseCd = dashCooldown;
+        else if (skill == PartType.HpBoostActive) baseCd = hpBoostCooldown;
+        else if (skill == PartType.EnergyShield) baseCd = energyShieldCooldown;
+
+        if (DataManager.Instance != null && DataManager.Instance.HasPart(PartType.PassiveCooldown))
+        {
+            baseCd *= 0.75f;
+        }
+        return Mathf.Max(0.5f, baseCd);
+    }
 
     public float Remaining(PartType skill)
     {
@@ -37,16 +81,20 @@ public class Item : MonoBehaviour
 
     public float CooldownRatio(PartType skill)
     {
-        return skillCooldown > 0f ? Remaining(skill) / skillCooldown : 0f;
+        float remain = Remaining(skill);
+        if (remain <= 0f) return 0f;
+        float total = lastCooldownDuration.TryGetValue(skill, out float dur) && dur > 0f ? dur : GetSkillMaxCooldown(skill);
+        return Mathf.Clamp01(remain / total);
     }
 
-    // 퀵슬롯 스킬 실행 (Player.cs에서 호출)
+    // 퀵슬롯 및 전용 키 스킬 실행 (Player.cs에서 호출)
     public bool ExecuteSkill(PartType skill)
     {
-        // 쿨타임 검사: 대기 시간 중이면 거절 효과음 재생 후 취소
+        if (skill == PartType.None || DataManager.IsPassivePart(skill)) return false;
+
         if (cooldownEnd.TryGetValue(skill, out float end) && Time.time < end)
         {
-            SoundManager.Play(SoundManager.Sfx.Deny); // [사운드 연동] 쿨타임 진행 중 거절음
+            SoundManager.Play(SoundManager.Sfx.Deny);
             Debug.Log($"{skill} 재사용 대기 중 (남은 시간: {end - Time.time:F1}초)");
             return false;
         }
@@ -61,25 +109,36 @@ public class Item : MonoBehaviour
             case PartType.SlowField: success = ExecuteSlowField(); break;
             case PartType.PositionSwap: success = ExecutePositionSwap(); break;
             case PartType.Shockwave: success = ExecuteShockwave(); break;
+            case PartType.Dash: success = ExecuteDash(); break;
+            case PartType.HpBoostActive: success = ExecuteHpBoostActive(); break;
+            case PartType.EnergyShield: success = ExecuteEnergyShield(); break;
         }
 
-        // 실제로 스킬 발동에 성공했을 때만 파츠별 전용 사운드 재생
         if (success)
         {
-            cooldownEnd[skill] = Time.time + skillCooldown;
-            SoundManager.PlaySkill((int)skill); // [사운드 연동] 1~5번 파츠별 맞춤 효과음 자동 분기
-            Debug.Log($"[스킬 발동 성공] {skill}");
+            float cd = GetSkillMaxCooldown(skill);
+            lastCooldownDuration[skill] = cd;
+            cooldownEnd[skill] = Time.time + cd;
+
+            if ((int)skill <= 7)
+            {
+                SoundManager.PlaySkill((int)skill);
+            }
+            else
+            {
+                SoundManager.Play(SoundManager.Sfx.ItemPickup);
+            }
+            Debug.Log($"[스킬 발동 성공] {skill} (쿨타임 {cd:F1}초)");
         }
         return success;
     }
 
-    #region 5대 스킬 실질 기능 구현
+    #region 액티브 스킬 실질 기능 구현
 
-    // 1. 강제 유도: 화면 내 적 투사체들을 가장 가까운 적에게 방향 전환
+    // 1. 강제 유도
     private bool ExecuteForcedGuidance()
     {
         Transform targetTransform = FindFacingEnemy();
-
         if (targetTransform == null) return false;
 
         EnemyBullet[] bullets = FindObjectsByType<EnemyBullet>(FindObjectsSortMode.None);
@@ -115,11 +174,10 @@ public class Item : MonoBehaviour
                 best = enemy.transform;
             }
         }
-
         return best;
     }
 
-    // 2. 시간 정지: 일정 시간 동안 적의 투사체 속도를 0으로 고정
+    // 2. 시간 정지
     private bool ExecuteTimeStop()
     {
         StartCoroutine(TimeStopRoutine(timeStopDuration));
@@ -149,7 +207,7 @@ public class Item : MonoBehaviour
         }
     }
 
-    // 3. 공격 반사: 주변 투사체의 진행 방향을 반대로 역전
+    // 3. 공격 반사
     private bool ExecuteReflection()
     {
         Collider2D[] cols = Physics2D.OverlapCircleAll(transform.position, reflectRadius);
@@ -173,7 +231,7 @@ public class Item : MonoBehaviour
         return reflectedCount > 0;
     }
 
-    // 4. 블랙홀: 주변 투사체들을 플레이어 위치(또는 지정 위치)로 끌어당겨 소멸
+    // 4. 블랙홀
     private bool ExecuteBlackHole()
     {
         StartCoroutine(BlackHoleRoutine(transform.position, blackHoleDuration));
@@ -211,7 +269,7 @@ public class Item : MonoBehaviour
         }
     }
 
-    // 5. 감속장: 플레이어 주변 투사체의 속도를 대폭 감소
+    // 5. 감속장
     private bool ExecuteSlowField()
     {
         StartCoroutine(SlowFieldRoutine(slowDuration));
@@ -240,7 +298,7 @@ public class Item : MonoBehaviour
         }
     }
 
-    // 6. 위치 스왑: 화면 안에서 가장 가까운 적과 자리를 바꾸고, 그 적을 잠시 멈춤
+    // 6. 위치 스왑
     private bool ExecutePositionSwap()
     {
         Camera cam = Camera.main;
@@ -252,7 +310,7 @@ public class Item : MonoBehaviour
         foreach (Enemy e in FindObjectsByType<Enemy>(FindObjectsSortMode.None))
         {
             Vector3 v = cam.WorldToViewportPoint(e.transform.position);
-            if (v.z <= 0f || v.x < 0f || v.x > 1f || v.y < 0f || v.y > 1f) continue; // 화면 밖 제외
+            if (v.z <= 0f || v.x < 0f || v.x > 1f || v.y < 0f || v.y > 1f) continue;
 
             float d = ((Vector2)(e.transform.position - transform.position)).sqrMagnitude;
             if (d < best)
@@ -262,14 +320,13 @@ public class Item : MonoBehaviour
             }
         }
 
-        if (nearest == null) return false; // 대상이 없으면 쿨타임 소모 안 함
+        if (nearest == null) return false;
 
         Vector3 playerPos = transform.position;
         Vector3 enemyPos = nearest.transform.position;
 
         transform.position = new Vector3(enemyPos.x, enemyPos.y, playerPos.z);
 
-        // 적은 Rigidbody2D로 움직이므로 rb.position도 같이 바꿔야 함
         Vector3 newEnemyPos = new Vector3(playerPos.x, playerPos.y, enemyPos.z);
         nearest.transform.position = newEnemyPos;
         Rigidbody2D erb = nearest.GetComponent<Rigidbody2D>();
@@ -279,17 +336,15 @@ public class Item : MonoBehaviour
             erb.linearVelocity = Vector2.zero;
         }
 
-        // 거리 0 넉백 = 속도 0으로 멈추고 pushTimer 동안 이동/사격 정지
         nearest.ApplyKnockback(Vector2.up, 0f, swapStunTime);
 
-        // 스왑 직후 잠깐 무적 (Player와 같은 오브젝트에 Item이 붙어 있음)
         Player player = GetComponent<Player>();
         if (player != null) player.ActivateInvincibleItem(swapInvincibleTime);
 
         return true;
     }
 
-    // 7. 충격파: 주변 적 탄을 지우고 적을 밀어냄 (보스는 밀리지 않음)
+    // 7. 충격파
     private bool ExecuteShockwave()
     {
         Collider2D[] cols = Physics2D.OverlapCircleAll(transform.position, shockwaveRadius);
@@ -319,14 +374,94 @@ public class Item : MonoBehaviour
             }
         }
 
-        StartCoroutine(ShockwaveRingRoutine(transform.position, shockwaveRadius));
+        StartCoroutine(RingEffectRoutine(transform.position, shockwaveRadius, new Color(0.5f, 0.9f, 1f, 1f), 0.3f));
         return affected > 0;
     }
 
-    // 충격파 연출: 퍼져 나가는 원 (이미지 없이 LineRenderer로 생성)
-    private IEnumerator ShockwaveRingRoutine(Vector3 center, float radius)
+    // 8. [신규 액티브] 부스터 대시: 바라보는 방향으로 순간 돌진 + 무적 + 대시 충격파
+    private bool ExecuteDash()
     {
-        GameObject go = new GameObject("ShockwaveRing");
+        Player player = GetComponent<Player>();
+        if (player == null) return false;
+
+        Vector3 startPos = transform.position;
+        player.PerformDash(dashDistance, dashDuration, dashInvincibleTime);
+        StartCoroutine(RingEffectRoutine(startPos, 1.6f, new Color(0f, 1f, 0.85f, 1f), 0.25f));
+        return true;
+    }
+
+    // 9. [신규 액티브] 나노 HP 증강: 최대 HP +1 확장 및 현재 HP +2 즉시 회복
+    private bool ExecuteHpBoostActive()
+    {
+        Player player = GetComponent<Player>();
+        if (player == null) return false;
+
+        player.ActivateHpBoostSkill(activeMaxHpBonus, activeHealAmount);
+        StartCoroutine(RingEffectRoutine(transform.position, 2.2f, new Color(0.2f, 1f, 0.4f, 1f), 0.4f));
+        return true;
+    }
+
+    // 10. [신규 액티브] 에너지 실드: 플레이어를 따라다니는 보호막이 적 탄막을 지우고 무적 부여
+    private bool ExecuteEnergyShield()
+    {
+        Player player = GetComponent<Player>();
+        if (player != null)
+        {
+            player.ActivateInvincibleItem(energyShieldDuration);
+        }
+        StartCoroutine(EnergyShieldRoutine(energyShieldDuration));
+        return true;
+    }
+
+    private IEnumerator EnergyShieldRoutine(float duration)
+    {
+        GameObject go = new GameObject("EnergyShieldRing");
+        LineRenderer lr = go.AddComponent<LineRenderer>();
+        lr.useWorldSpace = true;
+        lr.loop = true;
+        lr.startWidth = 0.09f;
+        lr.endWidth = 0.09f;
+        lr.sortingOrder = 100;
+
+        Shader shader = Shader.Find("Sprites/Default");
+        if (shader != null) lr.material = new Material(shader);
+
+        const int segments = 36;
+        lr.positionCount = segments;
+
+        float timer = 0f;
+        while (timer < duration && this != null)
+        {
+            timer += Time.deltaTime;
+            Vector3 center = transform.position;
+
+            for (int i = 0; i < segments; i++)
+            {
+                float a = (i / (float)segments) * Mathf.PI * 2f + timer * 4f;
+                lr.SetPosition(i, center + new Vector3(Mathf.Cos(a), Mathf.Sin(a), 0f) * energyShieldRadius);
+            }
+
+            Color c = new Color(0.3f, 0.85f, 1f, Mathf.Lerp(0.9f, 0.3f, timer / duration));
+            lr.startColor = c;
+            lr.endColor = c;
+
+            // 보호막 반경 내 적 탄막 제거
+            Collider2D[] cols = Physics2D.OverlapCircleAll(center, energyShieldRadius);
+            foreach (var col in cols)
+            {
+                EnemyBullet bullet = col.GetComponentInParent<EnemyBullet>();
+                if (bullet != null) Destroy(bullet.gameObject);
+            }
+
+            yield return null;
+        }
+
+        if (go != null) Destroy(go);
+    }
+
+    private IEnumerator RingEffectRoutine(Vector3 center, float radius, Color baseColor, float duration)
+    {
+        GameObject go = new GameObject("SkillEffectRing");
         LineRenderer lr = go.AddComponent<LineRenderer>();
         lr.useWorldSpace = true;
         lr.loop = true;
@@ -338,13 +473,12 @@ public class Item : MonoBehaviour
         if (shader != null) lr.material = new Material(shader);
 
         const int segments = 40;
-        const float duration = 0.3f;
         lr.positionCount = segments;
 
         for (float t = 0f; t < duration; t += Time.deltaTime)
         {
             float p = t / duration;
-            float r = Mathf.Lerp(0.3f, radius, p);
+            float r = Mathf.Lerp(0.25f, radius, p);
 
             for (int i = 0; i < segments; i++)
             {
@@ -352,7 +486,7 @@ public class Item : MonoBehaviour
                 lr.SetPosition(i, center + new Vector3(Mathf.Cos(a), Mathf.Sin(a), 0f) * r);
             }
 
-            Color c = new Color(0.5f, 0.9f, 1f, 1f - p);
+            Color c = new Color(baseColor.r, baseColor.g, baseColor.b, 1f - p);
             lr.startColor = c;
             lr.endColor = c;
             yield return null;
