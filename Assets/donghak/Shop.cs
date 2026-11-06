@@ -33,7 +33,9 @@ public class Shop : MonoBehaviour
         new PartInfo { type = PartType.TimeStop, displayName = "시간 정지", description = "잠시 동안 미사일만 멈춤", price = 250 },
         new PartInfo { type = PartType.Reflect, displayName = "공격 반사", description = "닿기 직전에 누르면 미사일을 되돌려 보냄", price = 200 },
         new PartInfo { type = PartType.BlackHole, displayName = "블랙홀", description = "누른 곳에 블랙홀을 만들어 주변 미사일 흡수", price = 350 },
-        new PartInfo { type = PartType.SlowField, displayName = "감속장", description = "잠시 동안 내 주변 미사일을 느리게", price = 150 }
+        new PartInfo { type = PartType.SlowField, displayName = "감속장", description = "잠시 동안 내 주변 미사일을 느리게", price = 150 },
+        new PartInfo { type = PartType.PositionSwap, displayName = "위치 스왑", description = "가장 가까운 적과 자리를 바꾸고 그 적을 잠시 멈춤", price = 300 },
+        new PartInfo { type = PartType.Shockwave, displayName = "충격파", description = "주변 적 탄을 지우고 적을 밀어냄", price = 200 }
     };
 
     [Header("화면 연결")]

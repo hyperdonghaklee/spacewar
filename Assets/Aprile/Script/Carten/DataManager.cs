@@ -19,7 +19,9 @@ public enum PartType
     TimeStop = 2,    // 시간 정지 (2번)
     Reflect = 3,     // 공격 반사 (3번)
     BlackHole = 4,   // 블랙홀 (4번)
-    SlowField = 5    // 감속장 (5번)
+    SlowField = 5,    // 감속장 (5번)
+    PositionSwap = 6, // 위치 스왑
+    Shockwave = 7     // 충격파
 }
 
 // =========================================================================================
